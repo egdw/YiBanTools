@@ -11,6 +11,7 @@ import random
 from urllib.parse import quote
 import string
 import time
+import re
 # 当前的session会话对象
 session = requests.session()
 
@@ -18,6 +19,11 @@ session = requests.session()
 
 user_website = ""
 user_id = ""
+group_id = ""
+puid = ""
+channel_id = ""
+actor_id = ""
+nick = ""
 
 
 def login(username, password):
@@ -81,22 +87,41 @@ def start(login_json):
     user_website = login_json['data']['url']
     user_id = get_user_id()
     print("获取到的用户id为:"+user_id)
-    
-    addFeed()
+
+    global group_id
+    global puid
+    global channel_id
+    global actor_id
+    global nick
+
+    info = getInfo()
+
+    group_id = info['group_id']
+    puid = info['puid']
+    channel_id = info['channel_id']
+    actor_id = info['actor_id']
+    nick = info['nick']
+
+    print(info)
+
+    qiandao()
     # 循环四次.
     for i in range(4):
+        addFeed()
+        addTopic()
+        addPersonWebsite()
         addblog()
-    addYiMiaoMiao()
-
+        addYiMiaoMiao()
+        add_vote()
+        print("执行一轮完成.等待下一轮执行")
+        time.sleep(5)
 
 
 def get_user_id():
     r = session.get("http://www.yiban.cn/my/feed")
     soup = BeautifulSoup(r.text, "html.parser")
-    span = soup.find_all("span" ,class_="user-account")[0]
+    span = soup.find_all("span", class_="user-account")[0]
     return str(span)[str(span).index("user_id/")+8:str(span).index("user_id/")+16]
-    
-    
 
 
 # 获取通过加密的密码
@@ -112,7 +137,18 @@ def encrypt(msg, cipher):
     return base64.b64encode(ciphertext).decode('ascii')
 
 
+def qiandao():
+    form_data = {
+        "optionid[]": 12182,
+        "input": ""
+    }
+    r = session.post("http://www.yiban.cn/ajax/checkin/answer", data=form_data)
+    result_json = json.loads(r.text)
+    print(result_json["message"])
+
 # 发布动态(完成)
+
+
 def addFeed():
     randomstr = str(random.randint(100, 99999))
     form_data = {
@@ -159,7 +195,7 @@ def addblog():
                 if(m_json["data"]["count"] == 0):
                     # 判断数量是否为空
                     return
-                
+
                 m_json = m_json["data"]["list"][0]
                 blog_id = m_json['id']
                 Mount_id = m_json['Mount_id']
@@ -178,6 +214,7 @@ def addblog():
 
         # print("获得blogid:"+blogid)
     else:
+        # 需要注意如果请求评论的速度过快会导致弹出验证码.
         print("发表博文失败")
 
 # 添加易喵喵
@@ -200,6 +237,96 @@ def addPersonWebsite():
     # 查看公共
     session.get("http://www.yiban.cn/user/index/index/user_id/15977811")
     print("网站\客户端查看(个人/公共/机构账号)主页完成")
+
+# 添加话题
+
+
+def addTopic():
+    randomstr = str(random.randint(100, 99999))
+    payload = {
+        'puid': puid,
+        'pubArea': group_id,
+        'title': randomstr,
+        'content': randomstr,
+        'isNotice': 'false',
+        'dom': '.js-submit'
+    }
+
+    Add_Topic = session.post(
+        'https://www.yiban.cn/forum/article/addAjax', data=payload, timeout=10)
+    return Add_Topic.json()['message']
+
+
+'''
+获取群组信息
+返回 JSON 字典
+'''
+
+
+def getInfo():
+
+    Get_Group_Info = session.get(
+        'https://www.yiban.cn/my/group/type/public', timeout=10)
+    group_id = re.search(
+        r'href="/newgroup/indexPub/group_id/(\d+)/puid/(\d+)"', Get_Group_Info.text).group(1)
+    puid = re.search(
+        r'href="/newgroup/indexPub/group_id/(\d+)/puid/(\d+)"', Get_Group_Info.text).group(2)
+
+    payload = {
+        'puid': puid,
+        'group_id': group_id
+    }
+
+    Get_Channel_Info = session.post(
+        'https://www.yiban.cn/forum/api/getListAjax', data=payload, timeout=10)
+    channel_id = Get_Channel_Info.json()['data']['channel_id']
+
+    Get_User_Info = session.post(
+        'https://www.yiban.cn/ajax/my/getLogin', timeout=10)
+    actor_id = Get_User_Info.json()['data']['user']['id']
+    nick = Get_User_Info.json()['data']['user']['nick']
+
+    info = {
+        'group_id': group_id,
+        'puid': puid,
+        'channel_id': channel_id,
+        'actor_id': actor_id,
+        'nick': nick
+    }
+
+    return info
+
+
+def add_vote():
+    randomstr = str(random.randint(100, 99999))
+    payload = {
+        'puid': puid,
+        'group_id': group_id,
+        'scope_ids': group_id,
+        'title': randomstr,
+        'subjectTxt': randomstr,
+        'subjectPic': None,
+        'options_num': 2,
+        'scopeMin': 1,
+        'scopeMax': 1,
+        'minimum': 1,
+        'voteValue': time.strftime("%Y-%m-%d %H:%M", time.localtime(1893427200)),
+        'voteKey': 2,
+        'public_type': 0,
+        'isAnonymous': 0,
+        "voteIsCaptcha": 0,
+        'istop': 1,
+        'sysnotice': 2,
+        'isshare': 1,
+        'subjectTxt_1': randomstr,
+        'subjectTxt_2': randomstr,
+        'rsa': 1,
+        'dom': '.js-submit'
+    }
+
+    session.post('https://www.yiban.cn/vote/vote/add',
+                 data=payload, timeout=10)
+    print("添加投票已经完成")
 
 
 # try:
